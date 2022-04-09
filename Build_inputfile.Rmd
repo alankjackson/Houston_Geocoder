@@ -1,0 +1,19 @@
+---
+title: "Build File for geocoding"
+author: "Alan Jackson"
+date: '2022-04-09'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(data.table)
+library(dtplyr)
+
+in_path <- "/home/ajackson/Dropbox/Rprojects/Curated_Data_Files/CoH_Address_Points/COH_Geocoding_Locations.rds"
+
+path <- "/home/ajackson/Dropbox/Rprojects/Houston_Geocoder/"
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
