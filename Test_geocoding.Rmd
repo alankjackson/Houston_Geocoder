@@ -1,0 +1,58 @@
+---
+title: "Test geocoding"
+author: "Alan Jackson"
+date: '2022-04-09'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(data.table)
+library(dtplyr)
+library(microbenchmark)
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##  Try out some strategies
+
+- match everything
+- match close to name
+- return several possibilities, ranked
+- Test timing on tibble vs table
+
+```{r create test data}
+
+testdata <- tribble(
+  ~Street_num, ~Prefix, ~Street_name, ~Street_type, ~Zipcode,
+  "1311",      ""     , "TULANE"    , "ST"        , "77008"
+)
+
+```
+
+```{r test things}
+
+set.seed(2017)
+
+mbm <- microbenchmark(
+"a"={
+  df[
+  (df$Street_num==testdata$Street_num) &
+  (df$Street_name==testdata$Street_name) &
+  (df$Street_type==testdata$Street_type) &
+  (df$Prefix==testdata$Prefix) &
+  (df$Zipcode==testdata$Zipcode),] 
+},
+
+"b"={
+  df %>% filter(Street_num==testdata$Street_num,
+              Street_name==testdata$Street_name,
+              Street_type==testdata$Street_type,
+              Prefix==testdata$Prefix,
+              Zipcode==testdata$Zipcode)
+}
+)
+
+
+```
+
