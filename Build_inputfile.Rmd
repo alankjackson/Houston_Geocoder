@@ -24,6 +24,7 @@ df <- readRDS(in_path)
 df$Street_num <- as.character(df$Street_num)
 df <- df %>% replace_na(list(Prefix="", Street_type=""))
 df <- df %>% rename(Street_name=New_street)
+df <- df %>% mutate(City=str_to_upper(City))
 
 dt <- df
 
