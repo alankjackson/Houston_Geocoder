@@ -17,3 +17,14 @@ path <- "/home/ajackson/Dropbox/Rprojects/Houston_Geocoder/"
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+##        Read in the tibble and convert
+
+```{r read}
+df <- readRDS(in_path)
+df$Street_num <- as.character(df$Street_num)
+dt <- df
+
+setDT(dt)
+
+```
+
