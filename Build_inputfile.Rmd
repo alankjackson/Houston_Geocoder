@@ -27,8 +27,20 @@ df <- df %>% rename(Street_name=New_street)
 
 dt <- df
 
-#setDT(dt)
 dt <- as.data.table(dt)
+
+dti <- dt
+setkeyv(dti,c("Street_num", "Street_name", "Street_type", "Prefix", "Zipcode"))
+```
+
+
+##        Build a test dataset
+
+```{r test data}
+
+testset <- readRDS("/home/ajackson/Dropbox/Rprojects/Curated_Data_Files/Houston_Permits/Permit_data.rds") %>% head(., n=500)
+
+
 
 ```
 
