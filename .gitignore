@@ -19,6 +19,7 @@
 
 # RStudio files
 .Rproj.user/
+Houton_Geocoder.Rproj
 
 # produced vignettes
 vignettes/*.html
