@@ -32,8 +32,6 @@ testdata <- tribble(
 
 ```{r test things}
 
-set.seed(2017)
-
 mbm <- microbenchmark(
 "a"={
   df[
@@ -50,9 +48,146 @@ mbm <- microbenchmark(
               Street_type==testdata$Street_type,
               Prefix==testdata$Prefix,
               Zipcode==testdata$Zipcode)
+},
+
+"c"={
+  dt[Street_num==testdata$Street_num &
+     Street_name==testdata$Street_name &
+     Street_type==testdata$Street_type &
+     Prefix==testdata$Prefix &
+     Zipcode==testdata$Zipcode]
+# },
+# 
+# "d"={
+#   dti[Street_num==testdata$Street_num &
+#      Street_name==testdata$Street_name &
+#      Street_type==testdata$Street_type &
+#      Prefix==testdata$Prefix &
+#      Zipcode==testdata$Zipcode]
 }
 )
 
+mbm
 
 ```
+
+I think we have a winner. After looking at how to use indexed tables, I think
+I will defer. Not using that seems fast enough.
+
+## let's build a simple app to test
+
+Create a bigger dataset, and build a simple function
+
+```{r next}
+
+#   First clean up input
+
+library(postmastr)
+pm_dictionary(type = "state", filter = c("TX"), case = "title", locale = "us")
+dirs <- pm_dictionary(type = "directional", filter = c("N", "S", "E", "W"), locale = "us")
+TX <- pm_dictionary(type = "state", filter = "TX", case = c("title", "upper"), locale = "us")
+cities <- pm_append(type = "city",
+                    input=c("HOUSTON", "WEST UNIVERSITY PL", "UNINCORPORATED",     
+                            "TOMBALL", "PASADENA", "SOUTHSIDE PLACE", 
+                            "HUMBLE", "BAYTOWN", "KATY", 
+                            "JACINTO CITY", "DEER PARK", "LA PORTE", 
+                            "WEBSTER", "CYPRESS", "JERSEY VILLAGE", 
+                            "PINEY POINT VILLAGE", "NASSAU BAY", "MISSOURI CITY", 
+                            "BELLAIRE", "SEABROOK", "SPRING VALLEY", 
+                            "SHOREACRES", "GALENA PARK", "SOUTH HOUSTON", 
+                            "PEARLAND", "HUNTERS CREEK", "HEDWIG VILLAGE", 
+                            "BUNKER HILL", "TAYLOR VILLAGE", "MORGANS POINT", 
+                            "EL LAGO", "HILSHIRE VILLAGE", "LEAGUE CITY", 
+                            "SPRING", "FRIENDSWOOD", "WALLER", 
+                            "RICHMOND", "ATASCOCITA", "STAFFORD", 
+                            "KINGWOOD", "HUFFMAN", "CHANNELVIEW", 
+                            "NEW CANEY", "NORTH BELT", "CLEAR BROOK CITY",
+                            "BUNKER HILL VILLAGE", "CROSBY"),
+                  output=c("HOUSTON", "WEST UNIVERSITY PL", "UNINCORPORATED",     
+                            "TOMBALL", "PASADENA", "SOUTHSIDE PLACE", 
+                            "HUMBLE", "BAYTOWN", "KATY", 
+                            "JACINTO CITY", "DEER PARK", "LA PORTE", 
+                            "WEBSTER", "CYPRESS", "JERSEY VILLAGE", 
+                            "PINEY POINT VILLAGE", "NASSAU BAY", "MISSOURI CITY", 
+                            "BELLAIRE", "SEABROOK", "SPRING VALLEY", 
+                            "SHOREACRES", "GALENA PARK", "SOUTH HOUSTON", 
+                            "PEARLAND", "HUNTERS CREEK", "HEDWIG VILLAGE", 
+                            "BUNKER HILL", "TAYLOR VILLAGE", "MORGANS POINT", 
+                            "EL LAGO", "HILSHIRE VILLAGE", "LEAGUE CITY", 
+                            "SPRING", "FRIENDSWOOD", "WALLER", 
+                            "RICHMOND", "ATASCOCITA", "STAFFORD", 
+                            "KINGWOOD", "HUFFMAN", "CHANNELVIEW", 
+                            "NEW CANEY", "NORTH BELT", "CLEAR BROOK CITY",
+                            "BUNKER HILL VILLAGE", "CROSBY"))
+
+#   Farm Roads
+
+FM <- 
+"FM 1960|FM 2100|FM 2351|FM 529|FM 2920|FM 1485
+|FM 2855|FM 1093|FM 2234|FM 362|FM 1942|FM 1314|FM 1463
+|FM 723|FM 1464|FM 686|FM 2978|FM 528|FM 521
+|FM 1098|FM 149|FM 1959|FM 359|FM 1488|FM 249
+|FM 2917|FM 1736|FM 526"     
+
+foo <- testset %>% 
+  #mutate(Address=str_glue("{Address}", ", ", "{Zipcode}")) %>% # add zipcode to addr
+  mutate(Address=str_replace(Address, "^(\\d+ )\\d/\\d ", "\\1")) %>% 
+  mutate(Address=str_replace(Address, " F M ", " FM "))
+#   Protect farm roads by adding an "A" at end that will later go away
+mask <- str_detect(foo$Address,"FM 1960|FM 2100|FM 2351|FM 529|FM 2920|FM 1485
+|FM 2855|FM 1093|FM 2234|FM 362|FM 1942|FM 1314|FM 1463
+|FM 723|FM 1464|FM 686|FM 2978|FM 528|FM 521
+|FM 1098|FM 149|FM 1959|FM 359|FM 1488|FM 249
+|FM 2917|FM 1736|FM 526" )
+
+foo[mask,]$Address <- paste(foo[mask,]$Address, "A") 
+
+
+foo <- pm_identify(foo, var="Address") # add ID fields
+foo2 <- pm_prep(foo, var="Address", type="street") # Prep data
+#pm_postal_all(foo2) # do all have zip?
+#foo2 <- pm_postal_parse(foo2)
+foo2 <- pm_houseFrac_parse(foo2)
+foo2 <- pm_house_parse(foo2)
+foo2 <- pm_streetDir_parse(foo2, dirs)
+#   Here we pause to remove room numbers and such
+foo2 <- foo2 %>% 
+  mutate(pm.address=str_remove(pm.address, " [A-Z] & [A-Z]$")) %>% 
+  mutate(pm.address=str_remove(pm.address, " \\d*$")) %>% # ending numbers
+  mutate(pm.address=str_remove(pm.address, " [A-Z]$")) %>% # ending single alpha
+  mutate(pm.address=str_remove(pm.address, " BLD$")) %>% # ending BLD
+  mutate(pm.address=str_remove(pm.address, " BLD\\d+$")) %>% # ending BLD
+  mutate(pm.address=str_remove(pm.address, " LVL\\d+$")) %>% # ending BLD
+  mutate(pm.address=str_remove(pm.address, " ACRX$")) %>% # ending BLD
+  mutate(pm.address=str_remove(pm.address, " \\(PVT\\)")) %>% # PVT
+  mutate(pm.address=str_remove(pm.address, " CNPY[A-Z]*$")) %>% 
+  mutate(pm.address=str_remove(pm.address, " BSMT$")) %>% 
+  mutate(pm.address=str_remove(pm.address, " FL$")) %>% 
+  mutate(pm.address=str_remove(pm.address, " B\\d-\\d$"))# %>% 
+
+foo2 <- pm_streetSuf_parse(foo2)
+foo2 <- pm_street_parse(foo2)
+
+foo2 <- foo2 %>% 
+  mutate(pm.street=str_replace(pm.street, " 1 At 2", " 1/2")) 
+
+foo2 <- foo2 %>% 
+  mutate(pm.street=str_to_upper(pm.street)) %>% 
+  mutate(pm.streetSuf=str_to_upper(pm.streetSuf))
+
+
+# foo <- testset %>% 
+#   mutate(Street_num=str_extract(Address, "^\\d+")) %>% 
+#   mutate(Address=str_remove(Address, "^\\d+ ")) %>% 
+
+#   mutate(Address=str_remove(Address, "^[NSEW] "))
+
+unique((filter(df, str_detect(Street_name, "^FM ")))$Street_name)
+
+unique(df$Street_type)
+
+```
+
+
+
 
