@@ -11,6 +11,15 @@ library(data.table)
 library(dtplyr)
 library(microbenchmark)
 
+Archive_path <- "/home/ajackson/Dropbox/Rprojects/Curated_Data_Files/CoH_Address_Points/"
+df <- readRDS(paste0(Archive_path, "COH_Geocoding_Locations.rds"))
+dt <- as.data.table(df)
+
+filename <- "COH_PDD_ADDRESS_POINTS_-_PDD.csv"
+
+dfraw <- read_csv(paste0(Archive_path, filename),
+               col_types="nnccccccccccccccnnccccccccccccccc")
+
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
@@ -27,6 +36,8 @@ testdata <- tribble(
   ~Street_num, ~Prefix, ~Street_name, ~Street_type, ~Zipcode,
   "1311",      ""     , "TULANE"    , "ST"        , "77008"
 )
+
+testset <- readRDS("/home/ajackson/Dropbox/Rprojects/Curated_Data_Files/Houston_Permits/Permit_data.rds") %>% head(., n=500)
 
 ```
 
@@ -120,28 +131,21 @@ cities <- pm_append(type = "city",
                             "NEW CANEY", "NORTH BELT", "CLEAR BROOK CITY",
                             "BUNKER HILL VILLAGE", "CROSBY"))
 
-#   Farm Roads
-
-FM <- 
-"FM 1960|FM 2100|FM 2351|FM 529|FM 2920|FM 1485
-|FM 2855|FM 1093|FM 2234|FM 362|FM 1942|FM 1314|FM 1463
-|FM 723|FM 1464|FM 686|FM 2978|FM 528|FM 521
-|FM 1098|FM 149|FM 1959|FM 359|FM 1488|FM 249
-|FM 2917|FM 1736|FM 526"     
-
 foo <- testset %>% 
-  #mutate(Address=str_glue("{Address}", ", ", "{Zipcode}")) %>% # add zipcode to addr
+#   get rid of address like 325 1/2. Get rid of the fraction
   mutate(Address=str_replace(Address, "^(\\d+ )\\d/\\d ", "\\1")) %>% 
-  mutate(Address=str_replace(Address, " F M ", " FM "))
 #   Protect farm roads by adding an "A" at end that will later go away
+  mutate(Address=str_replace(Address, " F M ", " FM "))
+
 mask <- str_detect(foo$Address,"FM 1960|FM 2100|FM 2351|FM 529|FM 2920|FM 1485
 |FM 2855|FM 1093|FM 2234|FM 362|FM 1942|FM 1314|FM 1463
 |FM 723|FM 1464|FM 686|FM 2978|FM 528|FM 521
 |FM 1098|FM 149|FM 1959|FM 359|FM 1488|FM 249
 |FM 2917|FM 1736|FM 526" )
 
-foo[mask,]$Address <- paste(foo[mask,]$Address, "A") 
+#   protect from removing ending numbers
 
+foo[mask,]$Address <- paste(foo[mask,]$Address, "A") 
 
 foo <- pm_identify(foo, var="Address") # add ID fields
 foo2 <- pm_prep(foo, var="Address", type="street") # Prep data
@@ -149,13 +153,15 @@ foo2 <- pm_prep(foo, var="Address", type="street") # Prep data
 #foo2 <- pm_postal_parse(foo2)
 foo2 <- pm_houseFrac_parse(foo2)
 foo2 <- pm_house_parse(foo2)
-foo2 <- pm_streetDir_parse(foo2, dirs)
+
 #   Here we pause to remove room numbers and such
 foo2 <- foo2 %>% 
   mutate(pm.address=str_remove(pm.address, " [A-Z] & [A-Z]$")) %>% 
-  mutate(pm.address=str_remove(pm.address, " \\d*$")) %>% # ending numbers
-  mutate(pm.address=str_remove(pm.address, " [A-Z]$")) %>% # ending single alpha
-  mutate(pm.address=str_remove(pm.address, " BLD$")) %>% # ending BLD
+  mutate(pm.address=str_remove(pm.address, " FL \\d+$")) %>% # ending numbers
+  mutate(pm.address=str_remove(pm.address, " BLD \\d+$")) %>% # ending numbers
+  mutate(pm.address=str_remove(pm.address, " \\d+$")) %>% # ending numbers
+  #mutate(pm.address=str_remove(pm.address, " [A-Z]$")) %>% # ending single alpha
+  mutate(pm.address=str_remove(pm.address, " BLD\\s*$")) %>% # ending BLD
   mutate(pm.address=str_remove(pm.address, " BLD\\d+$")) %>% # ending BLD
   mutate(pm.address=str_remove(pm.address, " LVL\\d+$")) %>% # ending BLD
   mutate(pm.address=str_remove(pm.address, " ACRX$")) %>% # ending BLD
@@ -163,8 +169,19 @@ foo2 <- foo2 %>%
   mutate(pm.address=str_remove(pm.address, " CNPY[A-Z]*$")) %>% 
   mutate(pm.address=str_remove(pm.address, " BSMT$")) %>% 
   mutate(pm.address=str_remove(pm.address, " FL$")) %>% 
-  mutate(pm.address=str_remove(pm.address, " B\\d-\\d$"))# %>% 
+  mutate(pm.address=str_remove(pm.address, " B\\d-\\d$")) %>% 
+  mutate(pm.address=str_remove(pm.address, " $\\d+[A-Z]+")) %>% 
+  mutate(pm.address=str_remove(pm.address, "\\s*$"))# %>% 
 
+#   remove ending alphas but protect certain street names:
+#   AVENUE, Z AND Z, T BAR M, O S T, LAZY J, H AND R, DIAMOND M
+
+mask2 <- str_detect(
+  foo2$pm.address,"AVENUE|Z AND Z|T BAR M|O S T|LAZY J|H AND R|DIAMOND M")
+
+foo2[!mask2,]$pm.address <- str_remove(foo2[!mask2,]$pm.address," [A-DF-MO-RT-VX-Z]$")
+
+foo2 <- pm_streetDir_parse(foo2, dirs)
 foo2 <- pm_streetSuf_parse(foo2)
 foo2 <- pm_street_parse(foo2)
 
@@ -173,21 +190,128 @@ foo2 <- foo2 %>%
 
 foo2 <- foo2 %>% 
   mutate(pm.street=str_to_upper(pm.street)) %>% 
-  mutate(pm.streetSuf=str_to_upper(pm.streetSuf))
+  mutate(pm.streetSuf=str_to_upper(pm.streetSuf)) %>% 
+  mutate(pm.preDir=replace_na(pm.preDir, "")) %>% 
+  mutate(pm.streetSuf=replace_na(pm.streetSuf, ""))
 
+foo <- pm_replace(foo2, source=foo)
 
-# foo <- testset %>% 
-#   mutate(Street_num=str_extract(Address, "^\\d+")) %>% 
-#   mutate(Address=str_remove(Address, "^\\d+ ")) %>% 
+#unique((filter(df, str_detect(Street_name, "^FM ")))$Street_name)
 
-#   mutate(Address=str_remove(Address, "^[NSEW] "))
-
-unique((filter(df, str_detect(Street_name, "^FM ")))$Street_name)
-
-unique(df$Street_type)
+#unique(df$Street_type)
 
 ```
 
+##    Now do some geocoding
+
+Need to be smart about this and allow for failure modes
+
+Test for each field in succession so that a reasonable error message can be
+emitted when things go south.
+
+- zip
+- street
+- address
+- street type
+- prefix
+
+```{r main event}
+
+#dt <- as.data.table(df)
+
+
+
+tmpout <- NULL
+failout <- NULL
+Audits <- NULL
+for (i in 1:nrow(foo)) {
+  audit <- tribble(~Address, ~Zip, ~Street_name, 
+                   ~Street_type, ~Street_num, ~Prefix)
+  audit[1,]$Address <- paste(foo[i,]$pm.house, foo[i,]$pm.preDir, foo[i,]$pm.street,
+                         foo[i,]$pm.streetSuf, foo[i,]$Zipcode)
+  #print(paste("--", i, "--", foo[i,]$Address))
+  
+  tmp <- dt[Zipcode==foo[i,]$Zipcode]
+  #print(paste("Zipcode:", nrow(tmp)))
+  audit$Zip <- nrow(tmp)
+  
+  tmp <- tmp[Street_name==foo[i,]$pm.street]
+  #print(paste("Street Name:", nrow(tmp)))
+  audit$Street_name <- nrow(tmp)
+  
+  tmp <- tmp[Street_type==foo[i,]$pm.streetSuf]
+  #print(paste("Street Type:", nrow(tmp)))
+  audit$Street_type <- nrow(tmp)
+  
+  tmp <- tmp[Street_num==foo[i,]$pm.house]
+  #print(paste("Street Num:", nrow(tmp)))
+  audit$Street_num <- nrow(tmp)
+  
+  tmp <- tmp[Prefix==foo[i,]$pm.preDir]
+  #print(paste("Prefix:", nrow(tmp)))
+  audit$Prefix <- nrow(tmp)
+  
+  Audits <- rbind(Audits, audit)
+  
+  if (nrow(tmp)==0) {
+    print("     ")
+    print("------  no hits")
+    print(foo[i,]$Address)
+    failout <- rbind(failout, foo[i,])
+  }
+  
+  if (nrow(tmp)>1) {
+    print("     ")
+    print(paste("------",nrow(tmp), "hits"))
+    print(foo[i,]$Address)
+    
+  }
+  
+  tmpout <- rbind(tmpout, tmp)
+}
+
+sum(Audits$Street_name==0)
+sum(Audits$Street_type==0)
+sum(Audits$Street_num==0)
+sum(Audits$Prefix==0)
+
+
+for (i in 1:nrow(failout)) {
+  tmp <- dt[Zipcode==failout[i,]$Zipcode]
+  tmp <- tmp[Street_name==failout[i,]$pm.street]
+  tmp <- tmp[Street_type==failout[i,]$pm.streetSuf]
+  tmp <- tmp[Prefix==failout[i,]$pm.preDir]
+  #   If house number fails, try to interpolate
+  tmp2 <- tmp[Street_num==failout[i,]$pm.house]
+  if (nrow(tmp2)==0) { # look for numbers within +-10. Then interpolate.
+    
+  }
+
+}
+
+```
+
+##        Let's try some repair strategies
+
+For names, look at lexical distance. What is a reasonable search radius? 2? 3?
+
+For Street type, look at the set of allowed types for that street name in that zip.
+
+for number, look for numbers +- 10 or so and interpolate if distance small
+
+for prefix, look at allowed for street in zip. If ambiguous, then can't resolve
+
+
+
+```{r repairs}
+
+Repair_name <- function(df, Zip, Name, distance=1) {
+  #   Use a list of street names per zip as df
+  #   Zip and Name are the input hopefully good zip and unmatched name
+  #   Distance is lexical distance
+}
+
+```
 
 
 
