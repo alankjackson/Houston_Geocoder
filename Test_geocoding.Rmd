@@ -135,7 +135,9 @@ foo <- testset %>%
 #   get rid of address like 325 1/2. Get rid of the fraction
   mutate(Address=str_replace(Address, "^(\\d+ )\\d/\\d ", "\\1")) %>% 
 #   Protect farm roads by adding an "A" at end that will later go away
-  mutate(Address=str_replace(Address, " F M ", " FM "))
+  mutate(Address=str_replace(Address, " F M ", " FM ")) %>% 
+#   Remove BLD (Building) designator
+  mutate(Address=str_replace(Address, " BLD ", " "))
 
 mask <- str_detect(foo$Address,"FM 1960|FM 2100|FM 2351|FM 529|FM 2920|FM 1485
 |FM 2855|FM 1093|FM 2234|FM 362|FM 1942|FM 1314|FM 1463
@@ -171,7 +173,10 @@ foo2 <- foo2 %>%
   mutate(pm.address=str_remove(pm.address, " FL$")) %>% 
   mutate(pm.address=str_remove(pm.address, " B\\d-\\d$")) %>% 
   mutate(pm.address=str_remove(pm.address, " $\\d+[A-Z]+")) %>% 
-  mutate(pm.address=str_remove(pm.address, "\\s*$"))# %>% 
+  mutate(pm.address=str_remove(pm.address, "\\s*$")) %>% 
+  mutate(pm.address=str_remove(pm.address, " GARG$")) %>% 
+  mutate(pm.address=str_remove(pm.address, " XYZ$")) %>% 
+  mutate(pm.address=str_replace(pm.address, " AVE .+$", " AVE"))# %>% 
 
 #   remove ending alphas but protect certain street names:
 #   AVENUE, Z AND Z, T BAR M, O S T, LAZY J, H AND R, DIAMOND M
@@ -289,6 +294,9 @@ for (i in 1:nrow(failout)) {
 
 }
 
+#failout <- failout %>% 
+#  replace_na(list(pm.preDir=" ", pm.streetSuf=" ")) 
+
 ```
 
 ##        Let's try some repair strategies
@@ -305,10 +313,56 @@ for prefix, look at allowed for street in zip. If ambiguous, then can't resolve
 
 ```{r repairs}
 
-Repair_name <- function(df, Zip, Name, distance=1) {
+#     Lets make a dataset containing only Street_name, Street_type, Prefix, 
+#     and Zip
+
+df_names_only <- df %>% 
+  group_by(Zipcode, Street_name, Street_type, Prefix) %>% 
+    summarize(Zipcode=last(Zipcode),
+              Street_name=last(Street_name),
+              Street_type=last(Street_type),
+              Prefix=last(Prefix),
+              ) %>% 
+  ungroup()  
+  
+
+####################
+Zip <- failout[45,]$Zipcode  
+Name <- failout[45,]$pm.street  
+Type <- failout[45,]$pm.streetSuf  
+prefix <- failout[45,]$pm.preDir  
+  
+####################
+  
+Repair_name <- function(df, Zip, Name, Type, prefix, distance=2) {
   #   Use a list of street names per zip as df
   #   Zip and Name are the input hopefully good zip and unmatched name
   #   Distance is lexical distance
+  foo <- df_names_only %>% 
+    filter(Zipcode==Zip,
+           Street_type==Type,
+           Prefix==prefix
+           ) %>% 
+    mutate(dist=adist(Street_name, Name)) %>% 
+    filter(dist<=distance)
+  foo
+}
+
+eraseme <- NULL
+for (i in 1:nrow(failout)) {
+  foo <- Repair_name(df_names_only,
+                     Zip=failout[i,]$Zipcode,
+                     Name=failout[i,]$pm.street,
+                     Type=failout[i,]$pm.streetSuf,
+                     prefix=failout[i,]$pm.preDir,
+                     distance=2
+                     )
+  print(paste(failout[i,4:7], foo))
+  eraseme <- rbind(eraseme, foo)
+}
+
+Repair_type <- function(df, Zip, Name, Type, prefix, distance=2){
+  
 }
 
 ```
