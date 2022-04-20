@@ -311,8 +311,7 @@ for prefix, look at allowed for street in zip. If ambiguous, then can't resolve
 
 
 
-```{r repairs}
-
+```{r repair name}
 #     Lets make a dataset containing only Street_name, Street_type, Prefix, 
 #     and Zip
 
@@ -322,15 +321,16 @@ df_names_only <- df %>%
               Street_name=last(Street_name),
               Street_type=last(Street_type),
               Prefix=last(Prefix),
+              n=n()
               ) %>% 
-  ungroup()  
-  
+  ungroup() %>% 
+  filter(n>1) # I don't trust the singletons
 
 ####################
-Zip <- failout[45,]$Zipcode  
-Name <- failout[45,]$pm.street  
-Type <- failout[45,]$pm.streetSuf  
-prefix <- failout[45,]$pm.preDir  
+#Zip <- failout[45,]$Zipcode  
+#Name <- failout[45,]$pm.street  
+#Type <- failout[45,]$pm.streetSuf  
+#prefix <- failout[45,]$pm.preDir  
   
 ####################
   
@@ -338,13 +338,19 @@ Repair_name <- function(df, Zip, Name, Type, prefix, distance=2) {
   #   Use a list of street names per zip as df
   #   Zip and Name are the input hopefully good zip and unmatched name
   #   Distance is lexical distance
-  foo <- df_names_only %>% 
+  foo <- df %>% 
+  #   Filter out streets where this will likely fail
+    filter(str_length(Street_name)>3) %>% #  eliminate short names
+    filter(!str_detect(Street_name, "STREET")) %>% # eliminate A STREET, B STREET
+    filter(!str_detect(Street_name, "^\\d+TH")) %>% # eliminate 4TH, 5TH, etc
+    filter(!str_detect(Street_name, "^CR \\d+")) %>%  # eliminate county roads
     filter(Zipcode==Zip,
            Street_type==Type,
            Prefix==prefix
            ) %>% 
     mutate(dist=adist(Street_name, Name)) %>% 
-    filter(dist<=distance)
+    filter(dist<=distance,
+           dist > 0)
   foo
 }
 
@@ -360,12 +366,167 @@ for (i in 1:nrow(failout)) {
   print(paste(failout[i,4:7], foo))
   eraseme <- rbind(eraseme, foo)
 }
-
-Repair_type <- function(df, Zip, Name, Type, prefix, distance=2){
-  
-}
-
 ```
 
+##        Street types repairs
+
+```{r repair type}
+
+Repair_type <- function(df, Zip, Name, Type, prefix){
+  #   What are the available type in the zip for that name?
+  #   If only one, use it. If more than one, emit choices.
+  #   unless it is CIR or CT
+  #foo <- df_names_only %>% 
+  foo <- df %>% 
+    filter(Zipcode==Zip,
+           Street_name==Name,
+           Prefix==prefix
+           )  
+  print(paste(Name, foo$Street_type))
+  if (nrow(foo)>0) {
+    return(foo) # return the Street_type and number of hits
+  } else {
+    return(paste("What the hell just happened?", prefix, Name, Type, Zip))
+  }
+}
+
+####################
+Zip <- failout[44,]$Zipcode  
+Name <- failout[44,]$pm.street  
+Type <- ""
+prefix <- failout[44,]$pm.preDir  
+####################
+  
+eraseme <- NULL
+for (i in 1:nrow(failout)) {
+  foo <- Repair_type(df_names_only,
+                     Zip=failout[i,]$Zipcode,
+                     Name=failout[i,]$pm.street,
+                     Type=failout[i,]$pm.streetSuf,
+                     prefix=failout[i,]$pm.preDir
+                     )
+  #print(paste(failout[i,4:7], foo))
+  eraseme <- rbind(eraseme, foo)
+}
+```
+
+##        Repair prefix
+
+Much like the street type. Look in zip and vote. If ambiguous, fail.
+
+```{r repair prefix}
+
+Repair_prefix <- function(df, Zip, Name, Type, prefix){
+  #   What are the available prefix in the zip for that name?
+  #   If more than one, emit choices.
+  #foo <- df_names_only %>% 
+  foo <- df %>% 
+    filter(Zipcode==Zip,
+           Street_name==Name,
+           Street_type==Type
+           )  
+  print(paste(Name, foo$Prefix))
+  if (nrow(foo)>0) {
+    return(foo) # return the Street_type and number of hits
+  } else {
+    return(paste("What the hell just happened?", prefix, Name, Type, Zip))
+  }
+}
+
+####################
+Zip <- failout[44,]$Zipcode  
+Name <- failout[44,]$pm.street  
+Type <- failout[44,]$pm.streetSuf  
+prefix <- failout[44,]$pm.preDir  
+#prefix <- ""
+####################
+  
+eraseme <- NULL
+for (i in 1:nrow(failout)) {
+  foo <- Repair_prefix(df_names_only,
+                     Zip=failout[i,]$Zipcode,
+                     Name=failout[i,]$pm.street,
+                     Type=failout[i,]$pm.streetSuf,
+                     prefix=failout[i,]$pm.preDir
+                     )
+  #print(paste(failout[i,4:7], foo))
+  eraseme <- rbind(eraseme, foo)
+}
+```
+
+##        Repair the Address number
+
+Basically need to somehow interpolate the numbers that are close.
+
+
+```{r repair Number}
+
+Repair_number <- function(df, Number, Zip, Name, Type, prefix, distance=10){
+  #   What are the available prefix in the zip for that name?
+  #   If more than one, emit choices.
+  foo <- dt %>% 
+    filter(Zipcode==Zip,
+           Street_name==Name,
+           Prefix==prefix,
+           Street_type==Type
+           ) %>% 
+    as_tibble()
+  ##print(paste(Name, foo$Prefix))
+  Target <- as.numeric(Number) # set up for comparisons
+  foo$Street_num <- as.numeric(foo$Street_num)
+  
+  Sample <- foo %>% 
+    filter(between(Street_num, (Target-distance), (Target+distance)))
+  
+  if (nrow(Sample)<3){ # hard to interpolate one value
+    #   do values all head in the same direction, roughly?
+    #   I don't want to use addresses that backtrack
+    return(0)
+  }
+  
+  foo <- lm(Y~X, data=Sample)
+  r=unname(foo$residuals) # distance from point to line
+  theta=atan(foo[[1]][[1]]) # atan of slope
+  X <-Sample$X - r*cos(theta)  # X coordinate projected to line
+  Y <-Sample$Y - r*sin(theta)  # Y coordinate projected to line
+  foobar <- as_tibble(data.frame(Sample$Street_num, X, Y))
+  
+  Sample %>% ggplot(aes(x=X, y=Y)) +
+    geom_point() +
+    geom_point(data=foobar, aes(x=X, y=Y), color="red")
+  
+  
+  return(Sample)
+  
+  # if (nrow(foo)>0) {
+  #   return(foo) # return the Street_type and number of hits
+  # } else {
+  #   return(paste("What the hell just happened?", prefix, Name, Type, Zip))
+  # }
+}
+
+####################
+Zip <- failout[1,]$Zipcode  
+Name <- failout[1,]$pm.street  
+Type <- failout[1,]$pm.streetSuf  
+prefix <- failout[1,]$pm.preDir  
+Number <- "911"
+#prefix <- ""
+####################
+  
+eraseme <- NULL
+for (i in 1:nrow(failout)) {
+  foo <- Repair_number(dt,
+                     Number=failout[i,]$pm.house,
+                     Zip=failout[i,]$Zipcode,
+                     Name=failout[i,]$pm.street,
+                     Type=failout[i,]$pm.streetSuf,
+                     prefix=failout[i,]$pm.preDir,
+                     distance=10
+                     )
+  #print(paste(failout[i,4:7], foo))
+  eraseme <- rbind(eraseme, foo)
+}
+```
 
 
