@@ -137,7 +137,11 @@ foo <- testset %>%
 #   Protect farm roads by adding an "A" at end that will later go away
   mutate(Address=str_replace(Address, " F M ", " FM ")) %>% 
 #   Remove BLD (Building) designator
-  mutate(Address=str_replace(Address, " BLD ", " "))
+  mutate(Address=str_replace(Address, " BLD ", " ")) %>% 
+#   streets deignated are Private are special and hard to geocode.
+#   We will remove that designation, but then flag it in a comments column
+  mutate(Special=ifelse(str_detect(Address, " \\(PVT\\)"), "Private", "")) 
+
 
 mask <- str_detect(foo$Address,"FM 1960|FM 2100|FM 2351|FM 529|FM 2920|FM 1485
 |FM 2855|FM 1093|FM 2234|FM 362|FM 1942|FM 1314|FM 1463
@@ -164,10 +168,10 @@ foo2 <- foo2 %>%
   mutate(pm.address=str_remove(pm.address, " \\d+$")) %>% # ending numbers
   #mutate(pm.address=str_remove(pm.address, " [A-Z]$")) %>% # ending single alpha
   mutate(pm.address=str_remove(pm.address, " BLD\\s*$")) %>% # ending BLD
+  mutate(pm.address=str_remove(pm.address, " \\(PVT\\)")) %>%  # PVT
   mutate(pm.address=str_remove(pm.address, " BLD\\d+$")) %>% # ending BLD
   mutate(pm.address=str_remove(pm.address, " LVL\\d+$")) %>% # ending BLD
   mutate(pm.address=str_remove(pm.address, " ACRX$")) %>% # ending BLD
-  mutate(pm.address=str_remove(pm.address, " \\(PVT\\)")) %>% # PVT
   mutate(pm.address=str_remove(pm.address, " CNPY[A-Z]*$")) %>% 
   mutate(pm.address=str_remove(pm.address, " BSMT$")) %>% 
   mutate(pm.address=str_remove(pm.address, " FL$")) %>% 
@@ -177,6 +181,14 @@ foo2 <- foo2 %>%
   mutate(pm.address=str_remove(pm.address, " GARG$")) %>% 
   mutate(pm.address=str_remove(pm.address, " XYZ$")) %>% 
   mutate(pm.address=str_replace(pm.address, " AVE .+$", " AVE"))# %>% 
+
+#   streets deignated are Private are special and hard to geocode.
+#   We will remove that designation, but then flag it in a comments column
+
+foo2 <- foo2 %>% 
+  mutate(Special=ifelse(str_detect(pm.address, " \\(PVT\\)"), "Private", "")) %>% 
+  mutate(pm.address=str_remove(pm.address, " \\(PVT\\)")) # PVT
+
 
 #   remove ending alphas but protect certain street names:
 #   AVENUE, Z AND Z, T BAR M, O S T, LAZY J, H AND R, DIAMOND M
@@ -222,48 +234,74 @@ emitted when things go south.
 
 ```{r main event}
 
-#dt <- as.data.table(df)
-
-
-
 tmpout <- NULL
 failout <- NULL
 Audits <- NULL
 for (i in 1:nrow(foo)) {
+  print(foo[i,]$Address)
   audit <- tribble(~Address, ~Zip, ~Street_name, 
                    ~Street_type, ~Street_num, ~Prefix)
-  audit[1,]$Address <- paste(foo[i,]$pm.house, foo[i,]$pm.preDir, foo[i,]$pm.street,
-                         foo[i,]$pm.streetSuf, foo[i,]$Zipcode)
-  #print(paste("--", i, "--", foo[i,]$Address))
-  
+  audit[1,]$Address <- paste(foo[i,]$pm.house, foo[i,]$pm.preDir,
+                             foo[i,]$pm.street, foo[i,]$pm.streetSuf,
+                             foo[i,]$Zipcode) 
   tmp <- dt[Zipcode==foo[i,]$Zipcode]
-  #print(paste("Zipcode:", nrow(tmp)))
-  audit$Zip <- nrow(tmp)
+  audit$Zip <- nrow(tmp) # how many addresses in zipcode found?
+  if (nrow(tmp)==0){
+    print("--zip")
+    failout <- foo[i,] %>%
+      mutate(Fail="Zipcode") %>% 
+      rbind(failout)
+    next()
+  }
   
   tmp <- tmp[Street_name==foo[i,]$pm.street]
-  #print(paste("Street Name:", nrow(tmp)))
-  audit$Street_name <- nrow(tmp)
+  audit$Street_name <- nrow(tmp) # how many names found?
+  if (nrow(tmp)==0){
+    print("--name")
+    failout <- foo[i,] %>%
+      mutate(Fail="Name") %>% 
+      rbind(failout)
+    next()
+  }
   
   tmp <- tmp[Street_type==foo[i,]$pm.streetSuf]
-  #print(paste("Street Type:", nrow(tmp)))
-  audit$Street_type <- nrow(tmp)
+  audit$Street_type <- nrow(tmp) # how many of street type found?
+  if (nrow(tmp)==0){
+    print("--type")
+    failout <- foo[i,] %>%
+      mutate(Fail="Type") %>% 
+      rbind(failout)
+    next()
+  }
   
   tmp <- tmp[Street_num==foo[i,]$pm.house]
-  #print(paste("Street Num:", nrow(tmp)))
-  audit$Street_num <- nrow(tmp)
+  audit$Street_num <- nrow(tmp) # how many of street number found?
+  if (nrow(tmp)==0){
+    print("--Number")
+    failout <- foo[i,] %>%
+      mutate(Fail="Number") %>% 
+      rbind(failout)
+    next()
+  }
   
   tmp <- tmp[Prefix==foo[i,]$pm.preDir]
-  #print(paste("Prefix:", nrow(tmp)))
-  audit$Prefix <- nrow(tmp)
+  audit$Prefix <- nrow(tmp) # How many of street prefix found?
+  if (nrow(tmp)==0){
+    print("--prefix")
+    failout <- foo[i,] %>%
+      mutate(Fail="Prefix") %>% 
+      rbind(failout)
+    next()
+  }
   
   Audits <- rbind(Audits, audit)
   
-  if (nrow(tmp)==0) {
-    print("     ")
-    print("------  no hits")
-    print(foo[i,]$Address)
-    failout <- rbind(failout, foo[i,])
-  }
+#  if (nrow(tmp)==0) {
+#    print("     ")
+#    print("------  no hits")
+#    print(foo[i,]$Address)
+#    failout <- rbind(failout, foo[i,])
+#  }
   
   if (nrow(tmp)>1) {
     print("     ")
@@ -275,27 +313,9 @@ for (i in 1:nrow(foo)) {
   tmpout <- rbind(tmpout, tmp)
 }
 
-sum(Audits$Street_name==0)
-sum(Audits$Street_type==0)
-sum(Audits$Street_num==0)
-sum(Audits$Prefix==0)
+#   Initialize success flag
 
-
-for (i in 1:nrow(failout)) {
-  tmp <- dt[Zipcode==failout[i,]$Zipcode]
-  tmp <- tmp[Street_name==failout[i,]$pm.street]
-  tmp <- tmp[Street_type==failout[i,]$pm.streetSuf]
-  tmp <- tmp[Prefix==failout[i,]$pm.preDir]
-  #   If house number fails, try to interpolate
-  tmp2 <- tmp[Street_num==failout[i,]$pm.house]
-  if (nrow(tmp2)==0) { # look for numbers within +-10. Then interpolate.
-    
-  }
-
-}
-
-#failout <- failout %>% 
-#  replace_na(list(pm.preDir=" ", pm.streetSuf=" ")) 
+failout <- failout %>% mutate(Success=FALSE)
 
 ```
 
@@ -351,19 +371,25 @@ Repair_name <- function(df, Zip, Name, Type, prefix, distance=2) {
     mutate(dist=adist(Street_name, Name)) %>% 
     filter(dist<=distance,
            dist > 0)
-  foo
+  
+  foo$Street_name
 }
 
 eraseme <- NULL
-for (i in 1:nrow(failout)) {
+foobar <- failout %>% filter(Fail=="Name")
+for (i in 1:nrow(foobar)) {
+  print(paste("Names",i, foobar[i,]$pm.street))
   foo <- Repair_name(df_names_only,
-                     Zip=failout[i,]$Zipcode,
-                     Name=failout[i,]$pm.street,
-                     Type=failout[i,]$pm.streetSuf,
-                     prefix=failout[i,]$pm.preDir,
+                     Zip=foobar[i,]$Zipcode,
+                     Name=foobar[i,]$pm.street,
+                     Type=foobar[i,]$pm.streetSuf,
+                     prefix=foobar[i,]$pm.preDir,
                      distance=2
                      )
-  print(paste(failout[i,4:7], foo))
+  print(paste("---",foo))
+  if (!identical(foo,character(0))){ #  Flag success
+    failout[failout$pm.id==foobar[i,]$pm.id,]$Success=TRUE
+  }
   eraseme <- rbind(eraseme, foo)
 }
 ```
@@ -391,21 +417,24 @@ Repair_type <- function(df, Zip, Name, Type, prefix){
 }
 
 ####################
-Zip <- failout[44,]$Zipcode  
-Name <- failout[44,]$pm.street  
-Type <- ""
-prefix <- failout[44,]$pm.preDir  
+# Zip <- failout[44,]$Zipcode  
+# Name <- failout[44,]$pm.street  
+# Type <- ""
+# prefix <- failout[44,]$pm.preDir  
 ####################
   
 eraseme <- NULL
-for (i in 1:nrow(failout)) {
+foobar <- failout %>% filter(Fail=="Type")
+for (i in 1:nrow(foobar)) {
   foo <- Repair_type(df_names_only,
-                     Zip=failout[i,]$Zipcode,
-                     Name=failout[i,]$pm.street,
-                     Type=failout[i,]$pm.streetSuf,
-                     prefix=failout[i,]$pm.preDir
+                     Zip=foobar[i,]$Zipcode,
+                     Name=foobar[i,]$pm.street,
+                     Type=foobar[i,]$pm.streetSuf,
+                     prefix=foobar[i,]$pm.preDir
                      )
-  #print(paste(failout[i,4:7], foo))
+  
+  if (nrow(foo)==1){ #  Flag success
+    failout[failout$pm.id==foobar[i,]$pm.id,]$Success=TRUE}
   eraseme <- rbind(eraseme, foo)
 }
 ```
@@ -413,6 +442,9 @@ for (i in 1:nrow(failout)) {
 ##        Repair prefix
 
 Much like the street type. Look in zip and vote. If ambiguous, fail.
+
+More ambitious, to be done later?, would be to check for similar address range
+in the given zipcode to disambiguate the prefix.
 
 ```{r repair prefix}
 
@@ -425,7 +457,7 @@ Repair_prefix <- function(df, Zip, Name, Type, prefix){
            Street_name==Name,
            Street_type==Type
            )  
-  print(paste(Name, foo$Prefix))
+  print(paste(foo$Prefix, Name))
   if (nrow(foo)>0) {
     return(foo) # return the Street_type and number of hits
   } else {
@@ -442,14 +474,17 @@ prefix <- failout[44,]$pm.preDir
 ####################
   
 eraseme <- NULL
-for (i in 1:nrow(failout)) {
+foobar <- failout %>% filter(Fail=="Prefix")
+for (i in 1:nrow(foobar)) {
   foo <- Repair_prefix(df_names_only,
-                     Zip=failout[i,]$Zipcode,
-                     Name=failout[i,]$pm.street,
-                     Type=failout[i,]$pm.streetSuf,
-                     prefix=failout[i,]$pm.preDir
+                     Zip=foobar[i,]$Zipcode,
+                     Name=foobar[i,]$pm.street,
+                     Type=foobar[i,]$pm.streetSuf,
+                     prefix=foobar[i,]$pm.preDir
                      )
   #print(paste(failout[i,4:7], foo))
+  if (nrow(foo)==1){ #  Flag success
+    failout[failout$pm.id==foobar[i,]$pm.id,]$Success=TRUE}
   eraseme <- rbind(eraseme, foo)
 }
 ```
@@ -471,62 +506,174 @@ Repair_number <- function(df, Number, Zip, Name, Type, prefix, distance=10){
            Street_type==Type
            ) %>% 
     as_tibble()
-  ##print(paste(Name, foo$Prefix))
+  
   Target <- as.numeric(Number) # set up for comparisons
   foo$Street_num <- as.numeric(foo$Street_num)
   
-  Sample <- foo %>% 
-    filter(between(Street_num, (Target-distance), (Target+distance)))
+  #   Restrict to one block
   
-  if (nrow(Sample)<3){ # hard to interpolate one value
-    #   do values all head in the same direction, roughly?
-    #   I don't want to use addresses that backtrack
-    return(0)
+  Target_min <- round(Target, -2)
+  Target_max <- Target_min+99
+  
+  #   Restrict to same side of street
+  Sample <- foo %>% 
+    filter(between(Street_num, (Target_min), (Target_max))) %>% 
+    filter(Street_num%%2 == Target%%2)  
+  
+  if (nrow(Sample)<2){ # hard to interpolate one value
+    print("first try fail")
+    #   open up to 3 blocks
+  Target_min <- round(Target, -2)-100
+  Target_max <- Target_min+199
+  Sample <- foo %>% 
+    filter(between(Street_num, (Target_min), (Target_max))) %>% 
+    filter(Street_num%%2 == Target%%2)  
   }
   
-  foo <- lm(Y~X, data=Sample)
-  r=unname(foo$residuals) # distance from point to line
-  theta=atan(foo[[1]][[1]]) # atan of slope
-  X <-Sample$X - r*cos(theta)  # X coordinate projected to line
-  Y <-Sample$Y - r*sin(theta)  # Y coordinate projected to line
-  foobar <- as_tibble(data.frame(Sample$Street_num, X, Y))
+  if (nrow(Sample)<2){ # If still too few, hang it up
+    print("second try fail")
+    return(tribble(~Address, ~Lon, ~Lat, Target, 0, 0)) 
+  }
   
-  Sample %>% ggplot(aes(x=X, y=Y)) +
-    geom_point() +
-    geom_point(data=foobar, aes(x=X, y=Y), color="red")
+  #   Main event. Collaspe identical numbers,
+  #   Calculate a delta lat/long scaled by delta address
+  #   Then use the nearest address to apply that.
   
+  Interpolator <- 
+    Sample %>% 
+    arrange(Street_num) %>% 
+    group_by(Street_num) %>% 
+      summarize(Street_num=last(Street_num),
+                Lon=mean(Lon),
+                Lat=mean(Lat)) %>% 
+    mutate(Dx=Lon-lag(Lon),
+           Dy=Lat-lag(Lat),
+           Dnum=Street_num-lag(Street_num)) %>% 
+    mutate(Dx=(Dx/Dnum),
+           Dy=(Dy/Dnum))
+  Interpolator[1,]$Dx <- Interpolator[2,]$Dx # replace NA
+  Interpolator[1,]$Dy <- Interpolator[2,]$Dy # replace NA
   
-  return(Sample)
+ foo2 <- Interpolator[which.min(abs(Interpolator$Street_num-Target)),] 
   
-  # if (nrow(foo)>0) {
-  #   return(foo) # return the Street_type and number of hits
-  # } else {
-  #   return(paste("What the hell just happened?", prefix, Name, Type, Zip))
-  # }
-}
+ New_Lon <- foo2$Lon-(foo2$Street_num-Target)*foo2$Dx
+ New_Lat <- foo2$Lat-(foo2$Street_num-Target)*foo2$Dy
+ 
+# p <- 
+# Sample %>% ggplot(aes(x=Lon, y=Lat)) +
+#   geom_point() +
+#   geom_point(data=Est_pt, aes(x=Lon, y=Lat), color="red")+
+#   geom_label(data=Est_pt, aes(label=Address), color='red')+
+#   geom_label(aes(label=Street_num))
+ 
+ Est_pt <- tribble(~Address, ~Lon, ~Lat, 
+                   Target, New_Lon, New_Lat) 
+ 
+  return(Est_pt)
+} #####    end of Repair_number  ##############
 
 ####################
 Zip <- failout[1,]$Zipcode  
 Name <- failout[1,]$pm.street  
 Type <- failout[1,]$pm.streetSuf  
 prefix <- failout[1,]$pm.preDir  
-Number <- "911"
+Number <- failout[1,]$pm.house  
+#Number <- "911"
 #prefix <- ""
 ####################
   
 eraseme <- NULL
-for (i in 1:nrow(failout)) {
+foobar <- failout %>% filter(Fail=="Number")
+for (i in 1:nrow(foobar)) {
+  print(paste(failout[i,]$pm.house,failout[i,]$pm.street, failout[i,]$Zipcode ))
   foo <- Repair_number(dt,
-                     Number=failout[i,]$pm.house,
-                     Zip=failout[i,]$Zipcode,
-                     Name=failout[i,]$pm.street,
-                     Type=failout[i,]$pm.streetSuf,
-                     prefix=failout[i,]$pm.preDir,
+                     Number=foobar[i,]$pm.house,
+                     Zip=foobar[i,]$Zipcode,
+                     Name=foobar[i,]$pm.street,
+                     Type=foobar[i,]$pm.streetSuf,
+                     prefix=foobar[i,]$pm.preDir,
                      distance=10
                      )
-  #print(paste(failout[i,4:7], foo))
+  print(paste("--",i,"--"))
+  #print(foo)
+  if (foo$Lat>0){ #  Flag success
+    failout[failout$pm.id==foobar[i,]$pm.id,]$Success=TRUE}
   eraseme <- rbind(eraseme, foo)
 }
+
 ```
 
+##        What is the zip is wrong?
+
+For any left, do a final check to see if the zip is wrong.
+
+If perfect match in another zip, and street name does not exist in given zip,
+then we call it good.
+
+
+```{r zip}
+
+keepme <- failout
+####################
+Zip <- failout[17,]$Zipcode  
+Name <- failout[17,]$pm.street  
+Type <- failout[17,]$pm.streetSuf  
+Prefix <- failout[17,]$pm.preDir  
+Number <- failout[17,]$pm.house  
+Zip <- "77001"
+#prefix <- ""
+####################
+
+
+Repair_zip <- function(df, Zip, Name, Type, Prefix, Number){
+  #   If a perfect match in another zip *and* the street does not exist
+  #   in the given zip, then declare it fixed
+  foo <- df %>% 
+    filter(Street_num==Number,
+           Street_name==Name,
+           Prefix==Prefix,
+           Street_type==Type
+           ) %>% 
+    as_tibble()
+  
+  print(paste("..1..",foo$Zipcode, Name))
+  if (nrow(foo)==1) { # found just one hit
+    #   Does that street exist in the given zip?
+    foo2 <- df %>% 
+      filter(Zipcode==Zip,
+             Street_name==Name
+             ) %>% 
+      as_tibble()
+  #print(paste("..2..",foo2$Zipcode))
+      if (nrow(foo2)==0){ # looks good return new zip
+        return(foo$Zipcode)
+      }
+  }
+  return("None")
+}
+
+eraseme <- NULL
+foobar <- failout %>% filter(!Success)
+for (i in 1:nrow(foobar)) {
+  print(paste(foobar[i,]$pm.house,foobar[i,]$pm.street, foobar[i,]$Zipcode ))
+  foo <- Repair_zip(dt,
+                     Number=foobar[i,]$pm.house,
+                     Zip=foobar[i,]$Zipcode,
+                     Name=foobar[i,]$pm.street,
+                     Type=foobar[i,]$pm.streetSuf,
+                     Prefix=foobar[i,]$pm.preDir
+                     )
+  print(paste("--",i,"--"))
+
+
+
+  print(paste("---",foo))
+  if (foo!="None"){ #  Flag success
+    failout[failout$pm.id==foobar[i,]$pm.id,]$Success=TRUE
+    print("Success")
+  }
+  eraseme <- rbind(eraseme, foo)
+}
+
+```
 
