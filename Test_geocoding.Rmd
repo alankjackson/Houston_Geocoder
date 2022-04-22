@@ -179,6 +179,7 @@ foo2 <- foo2 %>%
   mutate(pm.address=str_remove(pm.address, " $\\d+[A-Z]+")) %>% 
   mutate(pm.address=str_remove(pm.address, "\\s*$")) %>% 
   mutate(pm.address=str_remove(pm.address, " GARG$")) %>% 
+  mutate(pm.address=str_remove(pm.address, "SFR$")) %>%  # Sing Fam Res
   mutate(pm.address=str_remove(pm.address, " XYZ$")) %>% 
   mutate(pm.address=str_replace(pm.address, " AVE .+$", " AVE"))# %>% 
 
